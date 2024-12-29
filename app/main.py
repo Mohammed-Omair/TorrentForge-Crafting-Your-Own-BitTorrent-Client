@@ -25,7 +25,7 @@ def main():
     print("Logs from your program will appear here!", file=sys.stderr)
 
     if command == "decode":
-        bencoded_value = sys.argv[2].encode()
+        bencoded_value = sys.argv[2].encode('utf-8')
 
         # json.dumps() can't handle bytes, but bencoded "strings" need to be
         # bytestrings since they might contain non utf-8 characters.
