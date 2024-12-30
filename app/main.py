@@ -29,6 +29,8 @@ def main():
         result = bencodepy.decode(bencoded_value)
         if isinstance(result, bytes):
             print(f'"{result.decode("utf-8")}"') 
+        elif isinstance(result, list):
+            print(result)
         elif isinstance(result, int):
             print(result)
  
