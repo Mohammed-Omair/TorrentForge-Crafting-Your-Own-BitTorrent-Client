@@ -7,7 +7,10 @@ def decode_bytes(obj):
     Recursively decode all bytes objects in a nested structure.
     """
     if isinstance(obj, bytes):
-        return obj.decode("utf-8")  # Decode bytes to string
+        try:
+            return obj.decode("utf-8")  # Decode bytes to string if possible
+        except UnicodeDecodeError:
+            return obj.hex()  # Return as hex string for binary data
     elif isinstance(obj, list):
         return [decode_bytes(item) for item in obj]  # Decode elements in the list
     elif isinstance(obj, dict):
@@ -15,6 +18,12 @@ def decode_bytes(obj):
     else:
         return obj  # Return non-bytes objects as-is
 
+def info(file):
+    with open(file, 'rb') as f_in:
+        data = f_in.read()
+    result = bencodepy.decode(data)  # Decode the bencoded value
+    decoded_result = decode_bytes(result)  # Recursively decode bytes objects
+    print(f"Tracker URL: {decoded_result['announce']} Length: {decoded_result['info']['length']}")  # Pretty-print the result as JSON
 
 def main():
     command = sys.argv[1]
@@ -26,7 +35,9 @@ def main():
         bencoded_value = sys.argv[2].encode('utf-8')  # Convert input to bytes
         result = bencodepy.decode(bencoded_value)  # Decode the bencoded value
         decoded_result = decode_bytes(result)  # Recursively decode bytes objects
-        print(json.dumps(decoded_result))  # Convert to JSON-compatible format
+        print(json.dumps(decoded_result))  # Pretty-print the result as JSON
+    elif command == "info":
+        info(sys.argv[-1])
 
 
 if __name__ == "__main__":
