@@ -1,7 +1,7 @@
 import json
 import sys
 import bencodepy
-
+import hashlib
 def decode_bytes(obj):
     """
     Recursively decode all bytes objects in a nested structure.
@@ -23,7 +23,9 @@ def info(file):
         data = f_in.read()
     result = bencodepy.decode(data)  # Decode the bencoded value
     decoded_result = decode_bytes(result)  # Recursively decode bytes objects
-    print(f"Tracker URL: {decoded_result['announce']} Length: {decoded_result['info']['length']}")  # Pretty-print the result as JSON
+    info_dict = bencodepy.encode(result[b'info'])
+    info_dict = hashlib.sha1(info_dict).hexdigest()
+    print(f"Tracker URL: {decoded_result['announce']} Length: {decoded_result['info']['length']} Info Hash: {info_dict}")  # Pretty-print the result as JSON
 
 def main():
     command = sys.argv[1]
