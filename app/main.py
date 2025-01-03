@@ -3,6 +3,9 @@ import sys
 import bencodepy
 import hashlib
 import requests
+import struct
+import socket
+
 def decode_bytes(obj):
     """
     Recursively decode all bytes objects in a nested structure.
@@ -35,7 +38,25 @@ def peers(result, decoded_result):
     r = requests.get(decoded_result['announce'], params=payload)
     result = bencodepy.decode(r.content)  # Decode the bencoded value
     decoded_result = decode_bytes(result)
-    print(decoded_result)
+    peer_bytes = result[b'peers']
+    peer_list = []
+
+    # Each peer is represented by 6 bytes (4 for IP, 2 for port)
+    for i in range(0, len(peer_bytes), 6):
+        ip_bytes = peer_bytes[i:i+4]
+        port_bytes = peer_bytes[i+4:i+6]
+        
+        # Convert IP bytes to a human-readable string
+        ip_address = socket.inet_ntoa(ip_bytes)
+        
+        # Convert port bytes to an integer
+        port = struct.unpack('!H', port_bytes)[0]
+        
+        # Append as a tuple
+        peer_list.append(f"{ip_address}:{port}")
+
+    # Print the decoded peers
+    return peer_list
 
 
 def main():
@@ -56,7 +77,8 @@ def main():
         print(f"Tracker URL: {decoded_result['announce']} Length: {decoded_result['info']['length']} Info Hash: {info_dict} Piece Length: {decoded_result['info']['piece length']} Piece Hashed: {decoded_result['info']['pieces']}")
     elif command == 'peers':
         result, decoded_result = info(sys.argv[-1])
-        peers(result, decoded_result)
+        peer_list = peers(result, decoded_result)
+        print(peer_list)
 
 
 if __name__ == "__main__":
