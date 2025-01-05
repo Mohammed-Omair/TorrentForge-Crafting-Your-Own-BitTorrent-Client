@@ -58,6 +58,36 @@ def peers(result, decoded_result):
     # Print the decoded peers
     return peer_list
 
+def handshake(result, address):
+    ip, port = address.split(":")
+    port = int(port)
+
+    # Prepare handshake message
+    pstr = b"BitTorrent protocol"  # Protocol string
+    pstrlen = len(pstr)  # Length of protocol string
+    reserved = b"\x00" * 8  # Reserved bytes
+    info_hash = hashlib.sha1(bencodepy.encode(result[b'info'])).digest()  # SHA1 info hash
+    peer_id = b"imomairutamasterscse"  # Peer ID (must be 20 bytes)
+    handshake_msg = struct.pack("B", pstrlen) + pstr + reserved + info_hash + peer_id
+
+    # Establish a TCP connection and send the handshake
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.connect((ip, port))
+            s.sendall(handshake_msg)
+
+            # Receive handshake response
+            response = s.recv(68)  # Handshake response is always 68 bytes
+
+            # Validate response
+            if response[1:20] != pstr:
+                raise ValueError("Invalid protocol string in response.")
+            if response[28:48] != info_hash:
+                raise ValueError("Info hash mismatch in handshake response.")
+        except Exception as e:
+            print(f"Handshake failed: {e}")
+    decoded_result = decode_bytes(response)
+    print(f"Peer ID: {decoded_result[-40:]}")
 
 def main():
     command = sys.argv[1]
@@ -79,6 +109,10 @@ def main():
         result, decoded_result = info(sys.argv[-1])
         peer_list = peers(result, decoded_result)
         print(peer_list)
+    elif command == "handshake":
+        address = sys.argv[-1]
+        result, decoded_result = info(sys.argv[-2])
+        handshake(result, address)
 
 
 if __name__ == "__main__":
