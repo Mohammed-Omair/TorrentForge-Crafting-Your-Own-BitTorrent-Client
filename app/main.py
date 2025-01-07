@@ -5,6 +5,7 @@ import hashlib
 import requests
 import struct
 import socket
+import math
 
 def decode_bytes(obj):
     """
@@ -71,23 +72,46 @@ def handshake(result, address):
     handshake_msg = struct.pack("B", pstrlen) + pstr + reserved + info_hash + peer_id
 
     # Establish a TCP connection and send the handshake
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        try:
-            s.connect((ip, port))
-            s.sendall(handshake_msg)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect((ip, port))
+        s.sendall(handshake_msg)
 
-            # Receive handshake response
-            response = s.recv(68)  # Handshake response is always 68 bytes
+        # Receive handshake response
+        response = s.recv(68)  # Handshake response is always 68 bytes
 
-            # Validate response
-            if response[1:20] != pstr:
-                raise ValueError("Invalid protocol string in response.")
-            if response[28:48] != info_hash:
-                raise ValueError("Info hash mismatch in handshake response.")
-        except Exception as e:
-            print(f"Handshake failed: {e}")
+        # Validate response
+        if response[1:20] != pstr:
+            raise ValueError("Invalid protocol string in response.")
+        if response[28:48] != info_hash:
+            raise ValueError("Info hash mismatch in handshake response.")
+    except Exception as e:
+        print(f"Handshake failed: {e}")
     decoded_result = decode_bytes(response)
     print(f"Peer ID: {decoded_result[-40:]}")
+    return s
+
+def download_piece(address, s, decoded_result, piece_index):
+    piece_length = decoded_result['info']['piece length']
+    no_pieces = math.ceil(piece_length/16384)
+    print(no_pieces)
+    print(piece_length)
+    ip, port = address.split(":")
+    port = int(port)
+    try:
+        response = s.recv(2048)
+        print(response)
+        s.sendall(b'\x00\x00\x00\x02\x02')
+        response = s.recv(2048)
+        print(response)
+        msg_id = b'\x06'
+        length = 262144
+        #for i in range(no_pieces):
+            #payload = piece_index + begin + length
+            #msg = msg_lngth + msg_id + payload
+
+    except Exception as e:
+        print(f"Failed: {e}")
 
 def main():
     command = sys.argv[1]
@@ -112,7 +136,16 @@ def main():
     elif command == "handshake":
         address = sys.argv[-1]
         result, decoded_result = info(sys.argv[-2])
-        handshake(result, address)
+        s = handshake(result, address)
+    elif command == "download_piece":
+        result, decoded_result = info(sys.argv[-2])
+        piece_index = sys.argv[-1]
+        print(result)
+        print(decoded_result)
+        peer_list = peers(result, decoded_result)
+        print(peer_list)
+        s = handshake(result, peer_list[0])
+        download_piece(peer_list[0], s, decoded_result, piece_index)
 
 
 if __name__ == "__main__":
