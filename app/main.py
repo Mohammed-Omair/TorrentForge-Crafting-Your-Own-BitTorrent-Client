@@ -91,27 +91,98 @@ def handshake(result, address):
     print(f"Peer ID: {decoded_result[-40:]}")
     return s
 
-def download_piece(address, s, decoded_result, piece_index):
+
+
+def download_piece(s, decoded_result, piece_index, output_path):
+    """
+    Downloads a piece from the peer, saves it to the specified directory.
+    """
     piece_length = decoded_result['info']['piece length']
-    no_pieces = math.ceil(piece_length/16384)
-    print(no_pieces)
-    print(piece_length)
-    ip, port = address.split(":")
-    port = int(port)
+    block_size = 16 * 1024  # 16 KiB
+    total_blocks = math.ceil(piece_length / block_size)
+    piece_index = int(piece_index)  # Ensure the piece_index is an integer
     try:
+        # Receive the bitfield or any other message (read and discard for now)
         response = s.recv(2048)
-        print(response)
-        s.sendall(b'\x00\x00\x00\x02\x02')
-        response = s.recv(2048)
-        print(response)
-        msg_id = b'\x06'
-        length = 262144
-        #for i in range(no_pieces):
-            #payload = piece_index + begin + length
-            #msg = msg_lngth + msg_id + payload
+        print("Received from peer:", response)
+
+        # Send 'interested' message
+        s.sendall(b'\x00\x00\x00\x01\x02')  # length(1) + message ID(2)
+        print("Sent 'interested' message")
+
+        # Wait for 'unchoke' message
+        while True:
+            response = s.recv(2048)
+            print("Received from peer:", response)
+            msg_length = struct.unpack(">I", response[:4])[0]
+            msg_id = response[4]
+            if msg_id == 1:  # Unchoke message
+                print("Received 'unchoke' message")
+                break
+
+        # Prepare to collect blocks
+                # Prepare to collect blocks
+        piece_data = b""  # To store the combined blocks
+        total_blocks = math.ceil(piece_length / block_size)
+
+        # Adjust total_blocks for the last piece if necessary
+        if piece_index == (decoded_result['info']['length'] // piece_length):  # Last piece
+            remaining_length = decoded_result['info']['length'] % piece_length
+            if remaining_length > 0:
+                total_blocks = math.ceil(remaining_length / block_size)
+
+        for block_idx in range(total_blocks):
+            begin = block_idx * block_size
+            length = block_size
+
+            # Adjust the length for the last block in the piece
+            if piece_index == (decoded_result['info']['length'] // piece_length) and block_idx == total_blocks - 1:
+                length = (decoded_result['info']['length'] % piece_length) % block_size or (decoded_result['info']['length'] % piece_length)
+
+            # Validate values before packing
+            if not (0 <= begin <= 4294967295):
+                raise ValueError(f"Invalid begin value: {begin}")
+            if not (0 <= length <= 4294967295):
+                raise ValueError(f"Invalid length value: {length}")
+
+            # Construct the request message
+            msg_length = struct.pack(">I", 13)  # Message length (4 bytes)
+            msg_id = b'\x06'  # Message ID for request
+            payload = struct.pack(">III", piece_index, begin, length)
+            request_message = msg_length + msg_id + payload
+
+            # Send the request message
+            s.sendall(request_message)
+            # Read the response
+            buffer = b""
+            while len(buffer) < 13 + length:
+                part = s.recv(16384 + 13)  # Read more data until full message is received
+                if not part:
+                    raise ConnectionError("Peer closed the connection.")
+                buffer += part
+
+            # Validate and parse the piece message
+            msg_length = struct.unpack(">I", buffer[:4])[0]
+            msg_id = buffer[4]
+            if msg_id != 7:  # Ensure it's a piece message
+                raise ValueError(f"Unexpected message ID: {msg_id}")
+
+            # Extract the block data
+            block_data = buffer[13:]  # Skip length (4), msg_id (1), index (4), begin (4)
+            piece_data += block_data
+
+        # Save the piece to the specified output directory
+        with open(output_path, "wb") as file:
+            file.write(piece_data)
+
+        print(f"Piece saved to {output_path}")
+        return piece_data
+
 
     except Exception as e:
-        print(f"Failed: {e}")
+        print(f"Error during download_piece: {e}")
+
+
 
 def main():
     command = sys.argv[1]
@@ -139,13 +210,9 @@ def main():
         s = handshake(result, address)
     elif command == "download_piece":
         result, decoded_result = info(sys.argv[-2])
-        piece_index = sys.argv[-1]
-        print(result)
-        print(decoded_result)
         peer_list = peers(result, decoded_result)
-        print(peer_list)
         s = handshake(result, peer_list[0])
-        download_piece(peer_list[0], s, decoded_result, piece_index)
+        download_piece(s, decoded_result, sys.argv[-1], sys.argv[-3])
 
 
 if __name__ == "__main__":
