@@ -91,17 +91,7 @@ def handshake(result, address):
     print(f"Peer ID: {decoded_result[-40:]}")
     return s
 
-
-
-def download_piece(s, decoded_result, result, piece_index, output_path):
-    """
-    Downloads a piece from the peer, saves it to the specified directory, and verifies its hash.
-    """
-    piece_length = decoded_result['info']['piece length']
-    block_size = 16 * 1024  # 16 KiB
-    total_blocks = math.ceil(piece_length / block_size)
-    piece_index = int(piece_index)  # Ensure the piece_index is an integer
-    
+def msg(s):
     # Receive the bitfield or any other message (read and discard for now)
     response = s.recv(2048)
     print("Received from peer:", response)
@@ -119,6 +109,36 @@ def download_piece(s, decoded_result, result, piece_index, output_path):
         if msg_id == 1:  # Unchoke message
             print("Received 'unchoke' message")
             break
+
+
+
+def download_piece(s, decoded_result, result, piece_index, output_path):
+    """
+    Downloads a piece from the peer, saves it to the specified directory, and verifies its hash.
+    """
+    piece_length = decoded_result['info']['piece length']
+    block_size = 16 * 1024  # 16 KiB
+    total_blocks = math.ceil(piece_length / block_size)
+    piece_index = int(piece_index)  # Ensure the piece_index is an integer
+    
+    
+    # # Receive the bitfield or any other message (read and discard for now)
+    # response = s.recv(2048)
+    # print("Received from peer:", response)
+
+    # # Send 'interested' message
+    # s.sendall(b'\x00\x00\x00\x01\x02')  # length(1) + message ID(2)
+    # print("Sent 'interested' message")
+
+    # # Wait for 'unchoke' message
+    # while True:
+    #     response = s.recv(2048)
+    #     print("Received from peer:", response)
+    #     msg_length = struct.unpack(">I", response[:4])[0]
+    #     msg_id = response[4]
+    #     if msg_id == 1:  # Unchoke message
+    #         print("Received 'unchoke' message")
+    #         break
 
     # Prepare to collect blocks
     piece_data = b""  # To store the combined blocks
@@ -173,8 +193,8 @@ def download_piece(s, decoded_result, result, piece_index, output_path):
     # Verify the piece's hash
     expected_hash = result[b'info'][b'pieces'][piece_index * 20:(piece_index + 1) * 20]
     actual_hash = hashlib.sha1(piece_data).digest()
-    print(f"Expected Hash: {expected_hash}")
-    print(f"Actual Hash: {actual_hash}")
+    # print(f"Expected Hash: {expected_hash}")
+    # print(f"Actual Hash: {actual_hash}")
     if actual_hash != expected_hash:
         raise ValueError("Piece hash mismatch. Downloaded data is corrupted.")
     print("Piece downloaded and verified successfully.")
@@ -186,8 +206,57 @@ def download_piece(s, decoded_result, result, piece_index, output_path):
     print(f"Piece saved to {output_path}")
     return piece_data
 
-  
-#asdf
+def download_torrent(decoded_result, result, output_path, peer_list):
+    """
+    Downloads the entire file specified in the torrent file and saves it to disk.
+    """
+    
+    file_length = decoded_result['info']['length']
+    piece_length = decoded_result['info']['piece length']
+    num_pieces = math.ceil(file_length / piece_length)
+
+    print(f"Total file length: {file_length}")
+    print(f"Piece length: {piece_length}")
+    print(f"Number of pieces: {num_pieces}")
+
+    # Prepare to store downloaded pieces
+    file_data = b""  # This will hold the entire file content
+    s = handshake(result, peer_list[0])
+    msg(s)
+    # Loop through all pieces and download them
+    for piece_index in range(num_pieces):
+        print(f"Downloading piece {piece_index + 1}/{num_pieces}")
+
+        # Determine the output path for the piece
+        piece_path = f"{output_path}.part{piece_index}"
+
+        # Download the piece
+        piece_data = download_piece(s, decoded_result, result, piece_index, piece_path)
+
+        # Verify the piece hash
+        expected_hash = result[b'info'][b'pieces'][piece_index * 20:(piece_index + 1) * 20]
+        actual_hash = hashlib.sha1(piece_data).digest()
+
+        if actual_hash != expected_hash:
+            print("Hash mismatch!")
+            print(f"Expected Hash: {expected_hash}")
+            print(f"Actual Hash: {actual_hash}")
+            raise ValueError(f"Piece {piece_index} hash mismatch. Download failed.")
+        
+        print(f"Piece {piece_index} hash verified successfully.")
+
+        # Append piece data to the complete file
+        file_data += piece_data
+
+    # Save the complete file to disk
+    with open(output_path, "wb") as file:
+        file.write(file_data)
+
+    print(f"File downloaded successfully and saved to {output_path}")
+
+    # except Exception as e:
+    #     print(f"Error during torrent download: {e}")
+
 
 
 
@@ -221,7 +290,15 @@ def main():
         info_dict = hashlib.sha1(info_dict).hexdigest()
         peer_list = peers(result, decoded_result)
         s = handshake(result, peer_list[0])
+        msg(s)
         download_piece(s, decoded_result, result, sys.argv[-1], sys.argv[-3])
+    elif command == "download":
+        result, decoded_result = info(sys.argv[-1])
+        output_path = sys.argv[-2]
+        peer_list = peers(result, decoded_result)
+        # Handshake with the first peer
+        # Download the torrent file
+        download_torrent(decoded_result, result, output_path, peer_list)
 
 
 if __name__ == "__main__":
