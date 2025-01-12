@@ -112,7 +112,7 @@ def msg(s):
 
 
 
-def download_piece(s, decoded_result, result, piece_index, output_path):
+def download_piece(s, decoded_result, result, piece_index):
     """
     Downloads a piece from the peer, saves it to the specified directory, and verifies its hash.
     """
@@ -158,12 +158,6 @@ def download_piece(s, decoded_result, result, piece_index, output_path):
         if piece_index == (decoded_result['info']['length'] // piece_length) and block_idx == total_blocks - 1:
             length = (decoded_result['info']['length'] % piece_length) % block_size or (decoded_result['info']['length'] % piece_length)
 
-        # Validate values before packing
-        if not (0 <= begin <= 4294967295):
-            raise ValueError(f"Invalid begin value: {begin}")
-        if not (0 <= length <= 4294967295):
-            raise ValueError(f"Invalid length value: {length}")
-
         # Construct the request message
         msg_length = struct.pack(">I", 13)  # Message length (4 bytes)
         msg_id = b'\x06'  # Message ID for request
@@ -200,17 +194,35 @@ def download_piece(s, decoded_result, result, piece_index, output_path):
     print("Piece downloaded and verified successfully.")
 
     # Save the piece to the specified output directory
-    with open(output_path, "wb") as file:
-        file.write(piece_data)
 
-    print(f"Piece saved to {output_path}")
+    
     return piece_data
+
+from threading import Thread, Lock
+
+def download_piece_thread(peer_list, piece_index, result, decoded_result, output_data, lock):
+    """
+    Thread function to download a piece and save it to shared output data.
+    """
+    for peer in peer_list:
+        try:
+            s = handshake(result, peer)
+            msg(s)
+            piece_data = download_piece(s, decoded_result, result, piece_index)
+            s.close()
+            
+            # Save the piece data with a thread-safe lock
+            with lock:
+                output_data[piece_index] = piece_data
+            return  # Exit the function on successful download
+        except Exception as e:
+            print(f"Error downloading piece {piece_index} from peer {peer}: {e}")
+    raise RuntimeError(f"Failed to download piece {piece_index} from all peers.")
 
 def download_torrent(decoded_result, result, output_path, peer_list):
     """
-    Downloads the entire file specified in the torrent file and saves it to disk.
+    Downloads the entire file specified in the torrent file using multi-threading and saves it to disk.
     """
-    
     file_length = decoded_result['info']['length']
     piece_length = decoded_result['info']['piece length']
     num_pieces = math.ceil(file_length / piece_length)
@@ -219,43 +231,30 @@ def download_torrent(decoded_result, result, output_path, peer_list):
     print(f"Piece length: {piece_length}")
     print(f"Number of pieces: {num_pieces}")
 
-    # Prepare to store downloaded pieces
-    file_data = b""  # This will hold the entire file content
-    s = handshake(result, peer_list[0])
-    msg(s)
-    # Loop through all pieces and download them
+    # Prepare shared data structures
+    output_data = [None] * num_pieces  # To store downloaded pieces
+    lock = Lock()
+
+    # Create and start threads
+    threads = []
     for piece_index in range(num_pieces):
-        print(f"Downloading piece {piece_index + 1}/{num_pieces}")
+        thread = Thread(target=download_piece_thread, args=(peer_list, piece_index, result, decoded_result, output_data, lock))
+        threads.append(thread)
+        thread.start()
 
-        # Determine the output path for the piece
-        piece_path = f"{output_path}.part{piece_index}"
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
 
-        # Download the piece
-        piece_data = download_piece(s, decoded_result, result, piece_index, piece_path)
-
-        # Verify the piece hash
-        expected_hash = result[b'info'][b'pieces'][piece_index * 20:(piece_index + 1) * 20]
-        actual_hash = hashlib.sha1(piece_data).digest()
-
-        if actual_hash != expected_hash:
-            print("Hash mismatch!")
-            print(f"Expected Hash: {expected_hash}")
-            print(f"Actual Hash: {actual_hash}")
-            raise ValueError(f"Piece {piece_index} hash mismatch. Download failed.")
-        
-        print(f"Piece {piece_index} hash verified successfully.")
-
-        # Append piece data to the complete file
-        file_data += piece_data
-
-    # Save the complete file to disk
+    # Combine pieces and save the file
     with open(output_path, "wb") as file:
-        file.write(file_data)
+        for piece_index, piece_data in enumerate(output_data):
+            if piece_data is None:
+                raise RuntimeError(f"Missing data for piece {piece_index}. Download incomplete.")
+            file.write(piece_data)
 
     print(f"File downloaded successfully and saved to {output_path}")
 
-    # except Exception as e:
-    #     print(f"Error during torrent download: {e}")
 
 
 
@@ -291,7 +290,11 @@ def main():
         peer_list = peers(result, decoded_result)
         s = handshake(result, peer_list[0])
         msg(s)
-        download_piece(s, decoded_result, result, sys.argv[-1], sys.argv[-3])
+        piece_data = download_piece(s, decoded_result, result, sys.argv[-1])
+        # Save the piece to the specified output directory
+        with open(sys.argv[-3], "wb") as file:
+            file.write(piece_data)
+        print(f"Piece saved to {sys.argv[-3]}")
     elif command == "download":
         result, decoded_result = info(sys.argv[-1])
         output_path = sys.argv[-2]
